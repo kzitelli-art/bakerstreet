@@ -1,4 +1,4 @@
-// SPONSORS  merged from sponsors_national.js, sponsors_regional.js, sponsors_additional.js
+// SPONSORS  merged from sponsors_national.js, sponsors_regional.js, sponsors_additional.js
 // 73 companies - Last updated: March 2026
 // Structure: company snapshot + decision makers with career timelines, education, deals
 
