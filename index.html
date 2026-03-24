@@ -3277,7 +3277,7 @@ function App() {
           <table style={{width:"100%",borderCollapse:"collapse",tableLayout:"fixed"}}>
             <colgroup><col style={{width:90}}/><col style={{width:190}}/><col style={{width:100}}/><col style={{width:85}}/><col style={{width:85}}/><col style={{width:75}}/><col style={{width:60}}/><col style={{width:60}}/><col/></colgroup>
             <thead><tr style={{borderBottom:"2px solid #1a1612"}}>
-              {{[["SCORE","score"],["PROPERTY",null],["CITY",null],["BALANCE","balance"],["MATURITY","maturity"],["DSCR","dscr"],["SS",null],["WL",null],]].map(([h,sk])=><th key={h} onClick={sk?()=>setSortBy(sk):undefined} style={{padding:"8px 10px",textAlign:"left",fontSize:12,letterSpacing:"0.07em",color:sk&&sortBy===sk?"#c9914a":"#a09080",fontWeight:700,background:"#111",position:"sticky",top:0,zIndex:5,borderBottom:"1px solid #252015",cursor:sk?"pointer":"default",userSelect:"none"}}>{h}{sk&&sortBy===sk?" ↓":sk?" ·":""}</th>)}}
+              {{[["SCORE","score"],["PROPERTY",null],["CITY",null],["BALANCE","balance"],["MATURITY","maturity"],["DSCR","dscr"],["SS",null],["WL",null]]].map(([h,sk])=><th key={h} onClick={sk?()=>setSortBy(sk):undefined} style={{padding:"8px 10px",textAlign:"left",fontSize:12,letterSpacing:"0.07em",color:sk&&sortBy===sk?"#c9914a":"#a09080",fontWeight:700,background:"#111",position:"sticky",top:0,zIndex:5,borderBottom:"1px solid #252015",cursor:sk?"pointer":"default",userSelect:"none"}}>{h}{sk&&sortBy===sk?" ↓":sk?" ·":""}</th>)}}
             </tr></thead>
             <tbody>
               {filtered.map((deal,i)=>{
