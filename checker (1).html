@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Baker Street — Coverage Checker</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body,#root{height:100%;background:#111318;color:#e8e4de;font-family:'Inter',system-ui,sans-serif}
+    ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#1e1a14;border-radius:4px}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script src="sponsors.js"></script>
+<script src="sponsors2.js"></script>
+<script src="sponsors3.js"></script>
+<script src="sponsors4.js"></script>
+<script>
+// ── COVERAGE CHECKER ─────────────────────────────────────────────────────────
+function CoverageCheckerView() {
+  const [parsedDeals, setParsedDeals] = React.useState([]);
+  const [results, setResults]         = React.useState(null);
+  const [filter, setFilter]           = React.useState("all");
+  const [dragging, setDragging]       = React.useState(false);
+  const [fileName, setFileName]       = React.useState("");
+  const [status, setStatus]           = React.useState("Ready — drop a Trepp XLSX or CSV");
+  const [dbCount, setDbCount]         = React.useState(0);
+  const fileRef = React.useRef(null);
+
+  React.useEffect(function() {
+    var idx = buildCheckerIndex();
+    setDbCount(idx.length);
+  }, []);
+
+  var STOP = {"the":1,"and":1,"for":1,"llc":1,"lp":1,"inc":1,"corp":1,"trust":1,"fund":1,
+    "reit":1,"real":1,"estate":1,"group":1,"capital":1,"properties":1,"management":1,
+    "investment":1,"partners":1,"holdings":1,"residential":1,"commercial":1,
+    "industrial":1,"multifamily":1,"hotel":1,"hospitality":1};
+
+  function checkerTok(str) {
+    if (!str) return [];
+    return str.toLowerCase().split(/[\s,;|&()\-\.]+/).filter(function(w) {
+      return w.length >= 4 && !STOP[w];
+    });
+  }
+
+  function buildCheckerIndex() {
+    var allFiles = [
+      [typeof SPONSORS  !== "undefined" ? SPONSORS  : {}, "sponsors.js"],
+      [typeof SPONSORS2 !== "undefined" ? SPONSORS2 : {}, "sponsors2.js"],
+      [typeof SPONSORS3 !== "undefined" ? SPONSORS3 : {}, "sponsors3.js"],
+      [typeof SPONSORS4 !== "undefined" ? SPONSORS4 : {}, "sponsors4.js"],
+    ];
+    var idx = [];
+    for (var fi = 0; fi < allFiles.length; fi++) {
+      var obj = allFiles[fi][0];
+      var file = allFiles[fi][1];
+      var keys = Object.keys(obj);
+      for (var ki = 0; ki < keys.length; ki++) {
+        var key = keys[ki];
+        var data = obj[key];
+        var te = (data.treppEntities || []).filter(function(e) { return e && e.length > 3; });
+        idx.push({ key: key, file: file, kt: checkerTok(key), te: te, data: data });
+      }
+    }
+    return idx;
+  }
+
+  function checkerMatch(s, idx) {
+    if (!s || !s.trim()) return null;
+    var sl = s.toLowerCase().trim();
+    var st = checkerTok(s);
+    for (var i = 0; i < idx.length; i++) {
+      var e = idx[i];
+      if (sl.indexOf(e.key.toLowerCase().slice(0, 8)) >= 0) return { e: e, method: "name" };
+      for (var j = 0; j < e.te.length; j++) {
+        if (sl.indexOf(e.te[j].toLowerCase()) >= 0) return { e: e, method: "entity" };
+      }
+      var ov = st.filter(function(t) { return e.kt.indexOf(t) >= 0; });
+      var sv = ov.filter(function(t) { return t.length >= 7; });
+      if (ov.length >= 2 || sv.length >= 1) return { e: e, method: "keyword" };
+    }
+    return null;
+  }
+
+  function parseTreppAoA(aoa) {
+    if (!aoa || !aoa.length) return [];
+    var SIGNALS = {"propertyname":1,"sponsor":1,"currentbalance":1,"specservstatus":1,
+      "watchliststatus":1,"mostrecentdscrncf":1,"originalborrowername":1,"borrower":1,
+      "balance":1,"dscr":1};
+    var headerIdx = 0;
+    for (var i = 0; i < Math.min(aoa.length, 15); i++) {
+      var normed = aoa[i].map(function(c) { return String(c).toLowerCase().replace(/[^a-z0-9]/g, ""); });
+      var hits = normed.filter(function(n) { return SIGNALS[n]; }).length;
+      if (hits >= 2) { headerIdx = i; break; }
+    }
+    var hdrs = aoa[headerIdx].map(function(c) { return String(c).toLowerCase().replace(/[^a-z0-9]/g, ""); });
+    var ci = {};
+    for (var hi = 0; hi < hdrs.length; hi++) {
+      var n = hdrs[hi];
+      if (ci.n === undefined && ["propertyname","loanname","name","propname","dealname"].indexOf(n) >= 0) ci.n = hi;
+      if (n === "sponsor") ci.sponsor = hi;
+      if (ci.owner === undefined && ["owner1name","owner"].indexOf(n) >= 0) ci.owner = hi;
+      if (ci.origbw === undefined && ["originalborrowername","borrowername","borrower"].indexOf(n) >= 0) ci.origbw = hi;
+      if (["currentbalance","balance","bal","upb","loanbalance"].indexOf(n) >= 0) ci.bal = hi;
+      if (["mostrecentdscrncf","dscrncf","dscr","dscrratio","ncfdscr"].indexOf(n) >= 0) ci.dscr = hi;
+      if (["specservstatus","ssflag","ss","specialservicing","ssactive"].indexOf(n) >= 0) ci.ss = hi;
+      if (["watchliststatus","wlflag","wl","watchlist"].indexOf(n) >= 0) ci.wl = hi;
+      if (["state","propertystate","st"].indexOf(n) >= 0) ci.state = hi;
+      if (["propertytype","type","assettype"].indexOf(n) >= 0) ci.type = hi;
+    }
+    function gv(row, k) {
+      if (ci[k] !== undefined && row[ci[k]] !== undefined) return String(row[ci[k]]).trim();
+      return "";
+    }
+    var deals = [];
+    for (var ri = headerIdx + 1; ri < aoa.length; ri++) {
+      var row = aoa[ri];
+      if (!row || row.every(function(c) { return !c; })) continue;
+      var sponsor = gv(row, "sponsor");
+      if (!sponsor || sponsor === "-") sponsor = gv(row, "owner");
+      if (!sponsor || sponsor === "-") sponsor = gv(row, "origbw");
+      if (sponsor === "-") sponsor = "";
+      var name = gv(row, "n") || String(row[0] || "").trim();
+      if (!name && !sponsor) continue;
+      var br = gv(row, "bal").replace(/[$,\s]/g, "");
+      var bal = 0;
+      if      (br.slice(-1) === "B") bal = parseFloat(br) * 1e9;
+      else if (br.slice(-1) === "M") bal = parseFloat(br) * 1e6;
+      else if (br.slice(-1) === "K") bal = parseFloat(br) * 1e3;
+      else bal = parseFloat(br) || 0;
+      var dr = gv(row, "dscr");
+      var dscr = (!dr || dr === "-" || dr.toLowerCase() === "n/a") ? null : parseFloat(dr);
+      var ssv = gv(row, "ss").toLowerCase();
+      var wlv = gv(row, "wl").toLowerCase();
+      var ss = ["yes","y","1","true","ss","x"].indexOf(ssv) >= 0;
+      var wl = ["yes","y","1","true","wl","x"].indexOf(wlv) >= 0;
+      deals.push({ n: name, sponsor: sponsor, bal: bal, dscr: dscr, ss: ss, wl: wl,
+        state: gv(row, "state"), type: gv(row, "type") });
+    }
+    return deals;
+  }
+
+  function parseCsvText(raw) {
+    var allLines = raw.split("\n").map(function(l) { return l.trim(); }).filter(Boolean);
+    var sep = allLines[0].indexOf("\t") >= 0 ? "\t" : allLines[0].indexOf("|") >= 0 ? "|" : ",";
+    var SIGNALS = {"propertyname":1,"sponsor":1,"currentbalance":1,"specservstatus":1,
+      "watchliststatus":1,"mostrecentdscrncf":1,"originalborrowername":1,"borrower":1,"balance":1,"dscr":1};
+    var headerIdx = 0;
+    for (var i = 0; i < Math.min(allLines.length, 15); i++) {
+      var normed = allLines[i].split(sep).map(function(c) {
+        return c.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+      });
+      if (normed.filter(function(n) { return SIGNALS[n]; }).length >= 2) { headerIdx = i; break; }
+    }
+    var aoa = allLines.slice(headerIdx).map(function(line) {
+      return line.split(sep).map(function(c) { return c.trim().replace(/^["']|["']$/g, ""); });
+    });
+    return parseTreppAoA(aoa);
+  }
+
+  function readFile(file) {
+    setFileName(file.name);
+    setResults(null);
+    setStatus("Reading " + file.name + "...");
+    var ext = file.name.split(".").pop().toLowerCase();
+    if (ext === "xlsx" || ext === "xls") {
+      var r = new FileReader();
+      r.onload = function(e) {
+        try {
+          var wb = XLSX.read(e.target.result, { type: "array" });
+          var sheetName = wb.SheetNames[0];
+          var ws = wb.Sheets[sheetName];
+          var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+          var deals = parseTreppAoA(aoa);
+          setParsedDeals(deals);
+          setStatus(deals.length + " loans loaded from sheet: " + sheetName);
+        } catch(err) { setStatus("Error: " + err.message); }
+      };
+      r.readAsArrayBuffer(file);
+    } else {
+      var r2 = new FileReader();
+      r2.onload = function(e) {
+        var deals = parseCsvText(e.target.result);
+        setParsedDeals(deals);
+        setStatus(deals.length + " loans loaded — ready to check");
+      };
+      r2.readAsText(file);
+    }
+  }
+
+  function runCheck() {
+    if (!parsedDeals.length) { setStatus("Drop a file first."); return; }
+    var idx = buildCheckerIndex();
+    var res = parsedDeals.map(function(deal) {
+      return { deal: deal, match: checkerMatch(deal.sponsor, idx) };
+    });
+    setResults(res);
+    var n = res.filter(function(r) { return r.match; }).length;
+    setStatus(res.length + " loans checked — " + n + " covered (" + Math.round(n / res.length * 100) + "%)");
+    setFilter("all");
+  }
+
+  function fmtB(n) {
+    if (!n) return "";
+    if (n >= 1e9) return "$" + (n / 1e9).toFixed(1) + "B";
+    if (n >= 1e6) return "$" + (n / 1e6).toFixed(1) + "M";
+    return "$" + n.toLocaleString();
+  }
+
+  function exportResults(rows, label) {
+    var header = "property,sponsor,balance,dscr,ss,wl,state,type,status,matched_key,hq,aum,contacts\n";
+    var body = rows.map(function(r) {
+      var d = r.deal;
+      var m = r.match;
+      var sp = m ? m.e.data : {};
+      var cols = [d.n, d.sponsor, d.bal, d.dscr != null ? d.dscr : "",
+        d.ss ? "Y" : "", d.wl ? "Y" : "", d.state, d.type,
+        m ? "COVERED" : d.sponsor.trim() ? "NEW" : "NO_ID",
+        m ? m.e.key : "", sp.hq || "", sp.aum || "",
+        (sp.people || []).length || ""];
+      return cols.map(function(v) {
+        var s = String(v != null ? v : "");
+        return '"' + s.split('"').join('""') + '"';
+      }).join(",");
+    }).join("\n");
+    var blob = new Blob([header + body], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = (label || "coverage") + "_" + new Date().toISOString().slice(0, 10) + ".csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  var covered  = results ? results.filter(function(r) { return r.match; }) : [];
+  var newSpons = results ? results.filter(function(r) { return !r.match && r.deal.sponsor.trim(); }) : [];
+  var noId     = results ? results.filter(function(r) { return !r.deal.sponsor.trim(); }) : [];
+  var total    = results ? results.length : 0;
+  var pct      = total ? Math.round(covered.length / total * 100) : 0;
+  var hasRes   = results !== null;
+  var displayed = hasRes ? (
+    filter === "covered" ? covered :
+    filter === "new" ? newSpons :
+    filter === "noid" ? noId : results
+  ) : [];
+
+  function el(type, props) {
+    var children = Array.prototype.slice.call(arguments, 2);
+    return React.createElement.apply(React, [type, props].concat(children));
+  }
+
+  function renderRow(r, i) {
+    var deal = r.deal;
+    var match = r.match;
+    var sp = match ? match.e.data : null;
+    var isCov = !!match;
+    var isNew = !match && !!deal.sponsor.trim();
+    var badgeLabel = isCov ? "\u2605 COVERED" : isNew ? "+ NEW" : "? NO ID";
+    var badgeBg = isCov ? "rgba(201,145,74,0.18)" : isNew ? "rgba(96,165,250,0.15)" : "rgba(107,114,128,0.1)";
+    var badgeColor = isCov ? "#c9914a" : isNew ? "#60a5fa" : "#6b5a48";
+    var rowBg = isCov ? "rgba(201,145,74,0.06)" : isNew ? "rgba(96,165,250,0.06)" : "rgba(255,255,255,0.02)";
+    var rowBorder = isCov ? "rgba(201,145,74,0.25)" : isNew ? "rgba(96,165,250,0.25)" : "#2e3340";
+    var meta = [deal.type, deal.state].filter(Boolean).join(" \u00b7 ");
+    var peopleCount = sp ? (sp.people || []).length : 0;
+
+    return el("div", { key: i, style: { padding: "10px 14px", borderRadius: 6, marginBottom: 3,
+      border: "1px solid " + rowBorder, background: rowBg } },
+      el("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 } },
+        el("span", { style: { flexShrink: 0, fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
+          padding: "3px 8px", borderRadius: 4, background: badgeBg, color: badgeColor, whiteSpace: "nowrap" } }, badgeLabel),
+        el("div", { style: { flex: 1, fontSize: 13, fontWeight: 700, color: "#f0ece6",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, deal.n || "\u2014"),
+        deal.bal ? el("div", { style: { flexShrink: 0, fontSize: 13, fontWeight: 800,
+          color: isCov ? "#c9914a" : "#6b5a48" } }, fmtB(deal.bal)) : null
+      ),
+      el("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+        el("div", { style: { flex: 1, fontSize: 11, whiteSpace: "nowrap", overflow: "hidden",
+          textOverflow: "ellipsis", color: isCov ? "#b0a090" : isNew ? "#7898c8" : "#7070a0" } },
+          deal.sponsor || el("span", { style: { fontStyle: "italic", color: "#6a6a80" } }, "No sponsor"),
+          meta ? el("span", { style: { color: "#6a6a80" } }, " \u00b7 " + meta) : null
+        ),
+        el("div", { style: { display: "flex", gap: 3, flexShrink: 0 } },
+          deal.ss ? el("span", { style: { fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 2,
+            background: "rgba(192,132,252,0.12)", color: "#c084fc" } }, "SS") : null,
+          deal.wl ? el("span", { style: { fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 2,
+            background: "rgba(96,165,250,0.12)", color: "#60a5fa" } }, "WL") : null,
+          deal.dscr !== null ? el("span", { style: { fontSize: 10, fontWeight: 700,
+            color: deal.dscr < 0.75 ? "#ef4444" : deal.dscr < 1 ? "#f97316" : "#5a5048" } },
+            deal.dscr + "x") : null
+        )
+      ),
+      isCov && sp ? el("div", { style: { marginTop: 8, paddingTop: 8, borderTop: "1px solid #2e3340" } },
+        el("div", { style: { display: "flex", gap: 12 } },
+          el("div", { style: { flex: 1, minWidth: 0 } },
+            el("div", { style: { fontSize: 12, fontWeight: 700, color: "#c9914a", marginBottom: 2,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, match.e.key),
+            sp.hq ? el("div", { style: { fontSize: 11, color: "#9090a0", marginBottom: 2 } }, "\uD83D\uDCCD " + sp.hq) : null,
+            sp.aum && sp.aum !== "Unknown" ? el("div", { style: { fontSize: 11, color: "#7a8a6a" } }, sp.aum) : null,
+            sp.currentStrategy ? el("div", { style: { fontSize: 11, color: "#5a6858", lineHeight: 1.5,
+              marginTop: 3, overflow: "hidden", display: "-webkit-box",
+              WebkitLineClamp: 2, WebkitBoxOrient: "vertical" } }, sp.currentStrategy) : null
+          ),
+          el("div", { style: { flexShrink: 0, display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" } },
+            peopleCount > 0 ? el("span", { style: { fontSize: 11, padding: "3px 8px", borderRadius: 4,
+              background: "rgba(34,197,94,0.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.25)" } },
+              peopleCount + " contact" + (peopleCount > 1 ? "s" : "")) : null,
+            (sp.states || []).length > 0 ? el("div", { style: { fontSize: 10, color: "#8888a0" } },
+              (sp.states || []).slice(0, 4).join(" \u00b7 ")) : null
+          )
+        ),
+        peopleCount > 0 ? el("div", { style: { marginTop: 6, display: "flex", gap: 5, flexWrap: "wrap" } },
+          (sp.people || []).slice(0, 3).map(function(p, pi) {
+            return el("div", { key: pi, style: { fontSize: 10, padding: "2px 8px", borderRadius: 3,
+              background: "rgba(255,255,255,0.03)", border: "1px solid #2e3340", color: "#7a6a58",
+              whiteSpace: "nowrap", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" } },
+              p.name + (p.title ? " \u00b7 " + p.title.split(",")[0].slice(0, 28) : ""));
+          }),
+          peopleCount > 3 ? el("div", { style: { fontSize: 10, color: "#6a6a80" } }, "+" + (peopleCount - 3) + " more") : null
+        ) : null
+      ) : null
+    );
+  }
+
+  function renderSection(label, rows, color) {
+    if (!rows.length) return null;
+    return el(React.Fragment, { key: label },
+      el("div", { style: { fontSize: 11, fontWeight: 800, letterSpacing: "0.10em", color: color,
+        padding: "10px 0 5px", display: "flex", alignItems: "center", gap: 8 } },
+        label, el("div", { style: { flex: 1, height: 1, background: "#1a1612" } })
+      ),
+      rows.map(function(r, i) { return renderRow(r, i); })
+    );
+  }
+
+  var filterBtns = [
+    ["all",     "All \u00b7 " + total,                    "#c9914a"],
+    ["covered", "\u2605 Covered \u00b7 " + covered.length,"#c9914a"],
+    ["new",     "+ New \u00b7 " + newSpons.length,         "#60a5fa"],
+    ["noid",    "? No ID \u00b7 " + noId.length,           "#6b5a48"],
+  ];
+
+  var statItems = [
+    [hasRes ? total         : dbCount, hasRes ? "TOTAL LOANS"    : "SPONSORS IN DB", "#f0ece6"],
+    [hasRes ? covered.length: "\u2014","\u2605 COVERED",                             "#c9914a"],
+    [hasRes ? newSpons.length:"\u2014","+ NEED RESEARCH",                            "#60a5fa"],
+    [hasRes ? noId.length   : "\u2014","? NO SPONSOR ID",                            "#6b5a48"],
+    [hasRes ? pct + "%"     : "\u2014","COVERAGE",                                   "#22c55e"],
+  ];
+
+  return el("div", { style: { flex: 1, display: "flex", overflow: "hidden", background: "#111318" } },
+
+    el("div", { style: { width: 310, flexShrink: 0, borderRight: "1px solid #252a35",
+      display: "flex", flexDirection: "column", background: "#161a20" } },
+
+      el("div", { style: { padding: "18px 20px 14px", borderBottom: "1px solid #252a35" } },
+        el("div", { style: { fontSize: 18, fontWeight: 800, color: "#e8e4de", marginBottom: 6 } }, "Coverage Checker"),
+        el("div", { style: { fontSize: 12, color: "#9090a0", lineHeight: 1.6, marginBottom: 8 } },
+          "Drop a Trepp export to see which sponsors are already profiled vs. need new research."),
+        dbCount > 0 ? el("div", { style: { fontSize: 12, color: "#4adf84", background: "rgba(34,197,94,0.10)",
+          border: "1px solid rgba(34,197,94,0.25)", borderRadius: 4, padding: "3px 8px", display: "inline-block" } },
+          "\u2713 " + dbCount + " sponsors in database") : null
+      ),
+
+      el("div", {
+        style: { margin: "16px 20px 0", border: "2px dashed " + (dragging ? "#c9914a" : parsedDeals.length ? "#2a4a2a" : "#2a2218"),
+          borderRadius: 8, padding: "18px 14px", textAlign: "center", cursor: "pointer",
+          background: dragging ? "rgba(201,145,74,0.06)" : parsedDeals.length ? "rgba(34,197,94,0.03)" : "#0e0e0c",
+          transition: "all 0.15s" },
+        onDragOver: function(e) { e.preventDefault(); setDragging(true); },
+        onDragLeave: function() { setDragging(false); },
+        onDrop: function(e) { e.preventDefault(); setDragging(false); var f = e.dataTransfer.files[0]; if (f) readFile(f); },
+        onClick: function() { if (fileRef.current) fileRef.current.click(); }
+      },
+        el("input", { ref: fileRef, type: "file", accept: ".xlsx,.xls,.csv,.tsv,.txt",
+          style: { display: "none" }, onChange: function(e) { var f = e.target.files[0]; if (f) readFile(f); } }),
+        el("div", { style: { fontSize: 24, marginBottom: 5 } }, parsedDeals.length ? "\u2705" : "\uD83D\uDCC2"),
+        el("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 3,
+          color: parsedDeals.length ? "#22c55e" : "#c9914a" } },
+          parsedDeals.length ? "File loaded" : "Drop file or click to browse"),
+        el("div", { style: { fontSize: 11, color: "#6a6a80" } }, "XLSX \u00b7 XLS \u00b7 CSV \u00b7 TSV"),
+        parsedDeals.length ? el("div", { style: { marginTop: 8, fontSize: 12, color: "#22c55e",
+          fontFamily: "monospace", background: "rgba(34,197,94,0.10)", padding: "3px 10px",
+          borderRadius: 3, display: "inline-block" } }, fileName + " \u00b7 " + parsedDeals.length + " loans") : null
+      ),
+
+      el("div", { style: { margin: "12px 20px 0", padding: "8px 12px", background: "#1a1e26",
+        borderRadius: 5, fontSize: 11, color: "#9090a0", fontFamily: "monospace", lineHeight: 1.5, minHeight: 36,
+        borderLeft: "2px solid " + (parsedDeals.length ? "#22c55e" : "#3a4050") } }, status),
+
+      el("div", { style: { flex: 1 } }),
+
+      el("div", { style: { padding: "0 20px 20px" } },
+        el("button", {
+          onClick: runCheck,
+          disabled: !parsedDeals.length,
+          style: { width: "100%", padding: 12,
+            background: parsedDeals.length ? "linear-gradient(135deg,#5a3010,#c9914a)" : "#1a1612",
+            border: "none", borderRadius: 6, color: parsedDeals.length ? "#0a0a0a" : "#3a3020",
+            fontSize: 12, fontWeight: 800, fontFamily: "inherit", letterSpacing: "0.08em",
+            cursor: parsedDeals.length ? "pointer" : "default" }
+        }, hasRes ? "RE-RUN CHECK \u2192" : "CHECK COVERAGE \u2192")
+      )
+    ),
+
+    el("div", { style: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" } },
+
+      el("div", { style: { display: "grid", gridTemplateColumns: "repeat(5,1fr)",
+        gap: 1, background: "#1a1612", borderBottom: "1px solid #252a35", flexShrink: 0 } },
+        statItems.map(function(item) {
+          return el("div", { key: item[1], style: { background: "#161a20", padding: "12px 16px" } },
+            el("div", { style: { fontSize: 22, fontWeight: 800, lineHeight: 1, marginBottom: 3, color: item[2] } }, item[0]),
+            el("div", { style: { fontSize: 9, fontWeight: 700, letterSpacing: "0.12em", color: "#8888a0" } }, item[1])
+          );
+        })
+      ),
+
+      el("div", { style: { padding: "8px 18px", borderBottom: "1px solid #252a35",
+        background: "#161a20", flexShrink: 0 } },
+        el("div", { style: { height: 6, background: "#252a35", borderRadius: 2, overflow: "hidden" } },
+          el("div", { style: { height: "100%", width: (hasRes ? pct : 0) + "%",
+            background: "linear-gradient(90deg,#166534,#22c55e)", borderRadius: 2, transition: "width 0.7s ease" } })
+        ),
+        el("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 4,
+          fontSize: 10, color: "#6a6a80" } },
+          el("span", null, hasRes ? covered.length + " covered" : "Run check to see results"),
+          el("span", null, hasRes ? newSpons.length + " need research" : "")
+        )
+      ),
+
+      hasRes ? el("div", { style: { display: "flex", alignItems: "center", gap: 6,
+        padding: "8px 18px", borderBottom: "1px solid #252a35", background: "#161a20", flexShrink: 0 } },
+        filterBtns.map(function(item) {
+          var active = filter === item[0];
+          return el("button", { key: item[0], onClick: function() { setFilter(item[0]); },
+            style: { padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+              cursor: "pointer", fontFamily: "inherit",
+              border: "1px solid " + (active ? item[2] : "#2e3340"),
+              background: active ? item[2] + "28" : "transparent",
+              color: active ? item[2] : "#9090a8" } }, item[1]);
+        }),
+        el("div", { style: { flex: 1 } }),
+        el("button", { onClick: function() { exportResults(newSpons, "new_sponsors"); },
+          style: { padding: "4px 10px", borderRadius: 5, fontSize: 10, fontWeight: 600,
+            cursor: "pointer", fontFamily: "inherit", border: "1px solid #2e3340",
+            background: "transparent", color: "#60a5fa" } }, "\u2193 New List"),
+        el("button", { onClick: function() { exportResults(results, "full_report"); },
+          style: { padding: "4px 10px", borderRadius: 5, fontSize: 10, fontWeight: 600,
+            cursor: "pointer", fontFamily: "inherit", border: "1px solid #2e3340",
+            background: "transparent", color: "#c9914a" } }, "\u2193 Full Report")
+      ) : null,
+
+      el("div", { style: { flex: 1, overflowY: "auto", padding: "10px 16px" } },
+        !hasRes ? el("div", { style: { display: "flex", flexDirection: "column", alignItems: "center",
+          justifyContent: "center", height: "100%", gap: 12, textAlign: "center", padding: 40 } },
+          el("div", { style: { width: 52, height: 52, borderRadius: "50%", border: "2px dashed #1e1a14",
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: "#5a5a70" } }, "\u25C8"),
+          el("div", { style: { fontSize: 13, fontWeight: 700, color: "#6a6a80" } }, "Drop a Trepp export to get started"),
+          el("div", { style: { fontSize: 12, color: "#5a5a70", maxWidth: 240, lineHeight: 1.6 } },
+            "Upload your Trepp file on the left, then click Check Coverage to see which sponsors are already in your database.")
+        ) :
+        filter === "all" ? el(React.Fragment, null,
+          renderSection("COVERED \u2014 " + covered.length + " IN YOUR DATABASE", covered, "#4b5a3a"),
+          renderSection("NEW \u2014 " + newSpons.length + " NEED RESEARCH", newSpons, "#3a4a5a"),
+          renderSection("NO SPONSOR ID \u2014 " + noId.length, noId, "#3a3028")
+        ) : el(React.Fragment, null,
+          el("div", { style: { fontSize: 11, fontWeight: 800, letterSpacing: "0.10em", color: "#8888a0",
+            padding: "10px 0 5px", display: "flex", alignItems: "center", gap: 8 } },
+            displayed.length + " RESULTS",
+            el("div", { style: { flex: 1, height: 1, background: "#1a1612" } })
+          ),
+          displayed.length === 0 ? el("div", { style: { padding: "40px 0", textAlign: "center",
+            color: "#6a6a80", fontSize: 12 } }, "None in this category") : null,
+          displayed.map(function(r, i) { return renderRow(r, i); })
+        )
+      )
+    )
+  );
+}
+
+
+
+// Mount
+var root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(React.createElement(CoverageCheckerView));
+</script>
+</body>
+</html>
